@@ -9,7 +9,12 @@ This is a small demo app using Go, Tensorflow, and OpenCV to detect objects obje
 * The models are available at https://github.com/tensorflow/models/blob/master/research/object_detection/g3doc/detection_model_zoo.md.
 * This project uses the awesome Pixel to display things, 
 
-On a 2015 Macbook Pro using the SSD mobilenet model and CPU-only inference I can get ~8 FPS, compiling Tensorflow from source with AVX2 support I can get ~11 FPS, and customizing the stock models to have a high score_threshold gets ~14 FPS.
+## Performance
+On a 2015 Macbook Pro using the SSD mobilenet model and CPU-only inference I can get ~8 FPS 
+
+Compiling Tensorflow from source with AVX2 support I can get ~11 FPS.
+
+Customizing the stock models to have a high score_threshold gets ~14 FPS.
 
 ## Installation
 
