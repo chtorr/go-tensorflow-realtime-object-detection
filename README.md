@@ -1,5 +1,4 @@
-# go-tensorflow-object-detection
-Real-time object detection with Go, Tensorflow, and OpenCV
+# Real-time object detection with Go, Tensorflow, and OpenCV
 
 ## Overview
 
