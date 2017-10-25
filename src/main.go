@@ -23,7 +23,7 @@ import (
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/tensorflow/tensorflow/tensorflow/go/op"
 
-	_ "image/jpeg"
+	_ "golang.org/x/image/bmp"
 )
 
 const (
@@ -107,7 +107,7 @@ func loadLabels(labelsFile string) {
 }
 
 // Read frames from the webcam in a goroutine to absorb some of the read latency.
-// This helps gain ~2 FPS, but could incur some percieved input lag.
+// This helps gain ~2 FPS.
 func capture(deviceID int, frames chan []byte) {
 	cam, err := gocv.VideoCaptureDevice(deviceID)
 	if err != nil {
@@ -126,12 +126,13 @@ func capture(deviceID int, frames chan []byte) {
 		// Resize the Mat in place.
 		gocv.Resize(frame, frame, image.Point{X: W, Y: H}, 0.0, 0.0, gocv.InterpolationNearestNeighbor)
 
-		// Encode Mat as a jpg
-		// This seems weird, but is much faster than other methods of converting a Mat -> Tensor.
-		// Maybe find a way to build a Tensor from the Mat data pointer in CGO?
-		buf, _ := gocv.IMEncode(".jpg", frame)
+		// Encode Mat as a bmp (uncompressed)
+		buf, err := gocv.IMEncode(".bmp", frame)
+		if err != nil {
+			log.Fatalf("Error encoding frame: %v", err)
+		}
 
-		// Push the jpg to the channel
+		// Push the frame to the channel
 		frames <- buf
 	}
 }
@@ -238,28 +239,28 @@ func run() {
 	}
 }
 
-// Build a graph to decode jpg input into the proper format
+// Build a graph to decode bitmap input into the proper tensor shape
 // The object detection models take an input of [1,?,?,3]
-func decodeJpegGraph() (g *tf.Graph, input, output tf.Output, err error) {
+func decodeBitmapGraph() (g *tf.Graph, input, output tf.Output, err error) {
 	s := op.NewScope()
 	input = op.Placeholder(s, tf.String)
 	output = op.ExpandDims(s,
-		op.DecodeJpeg(s, input, op.DecodeJpegChannels(3)),
+		op.DecodeBmp(s, input, op.DecodeBmpChannels(3)),
 		op.Const(s.SubScope("make_batch"), int32(0)))
 	g, err = s.Finalize()
 	return
 }
 
 // Make a tensor from jpg image bytes
-func makeTensorFromImage(jpg []byte) (*tf.Tensor, image.Image, error) {
+func makeTensorFromImage(img []byte) (*tf.Tensor, image.Image, error) {
 
 	// DecodeJpeg uses a scalar String-valued tensor as input.
-	tensor, err := tf.NewTensor(string(jpg))
+	tensor, err := tf.NewTensor(string(img))
 	if err != nil {
 		return nil, nil, err
 	}
 	// Creates a tensorflow graph to decode the jpeg image
-	g, input, output, err := decodeJpegGraph()
+	g, input, output, err := decodeBitmapGraph()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -277,7 +278,7 @@ func makeTensorFromImage(jpg []byte) (*tf.Tensor, image.Image, error) {
 		return nil, nil, err
 	}
 
-	r := bytes.NewReader(jpg)
+	r := bytes.NewReader(img)
 	i, _, err := image.Decode(r)
 	if err != nil {
 		return nil, nil, err

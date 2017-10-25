@@ -4,10 +4,10 @@
 
 This is a small demo app using Go, Tensorflow, and OpenCV to detect objects objects in real time using the Google provided Tensorflow object detection models. 
 
-* The models are part of the Tensorflow Objecte Dection API project: https://github.com/tensorflow/models/tree/master/research/object_detection.
+* The models are part of the Tensorflow Object Dection API project: https://github.com/tensorflow/models/tree/master/research/object_detection.
 * The prediction code is laregely adapted from https://github.com/ActiveState/gococo.
 * The models are available at https://github.com/tensorflow/models/blob/master/research/object_detection/g3doc/detection_model_zoo.md.
-* This project uses the awesome Pixel to display things, 
+* This project uses the awesome Pixel to display things
 
 ## Performance
 On a 2015 Macbook Pro using the SSD mobilenet model and CPU-only inference I can get ~8 FPS 
