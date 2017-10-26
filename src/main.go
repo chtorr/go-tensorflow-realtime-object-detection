@@ -212,7 +212,7 @@ func run() {
 				txt := text.New(pixel.V(x1, y1), atlas)
 				txt.Color = objColor
 				txt.WriteString(getLabel(curObj, probabilities, classes))
-				txt.Draw(win, pixel.IM.Scaled(txt.Orig, 1))
+				txt.Draw(win, pixel.IM.Scaled(txt.Orig, 2))
 
 				// Push the box onto the draw stack
 				imd.Color = objColor
