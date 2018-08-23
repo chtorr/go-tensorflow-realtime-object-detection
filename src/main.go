@@ -119,12 +119,12 @@ func capture(deviceID int, frames chan []byte) {
 	defer frame.Close()
 
 	for {
-		if ok := cam.Read(frame); !ok {
+		if ok := cam.Read(&frame); !ok {
 			log.Fatal("failed reading cam")
 		}
 
 		// Resize the Mat in place.
-		gocv.Resize(frame, frame, image.Point{X: W, Y: H}, 0.0, 0.0, gocv.InterpolationNearestNeighbor)
+		gocv.Resize(frame, &frame, image.Point{X: W, Y: H}, 0.0, 0.0, gocv.InterpolationNearestNeighbor)
 
 		// Encode Mat as a bmp (uncompressed)
 		buf, err := gocv.IMEncode(".bmp", frame)
@@ -253,7 +253,6 @@ func decodeBitmapGraph() (g *tf.Graph, input, output tf.Output, err error) {
 
 // Make a tensor from jpg image bytes
 func makeTensorFromImage(img []byte) (*tf.Tensor, image.Image, error) {
-
 	// DecodeJpeg uses a scalar String-valued tensor as input.
 	tensor, err := tf.NewTensor(string(img))
 	if err != nil {
