@@ -24,7 +24,7 @@ import (
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/tensorflow/tensorflow/tensorflow/go/op"
 
-	_ "golang.org/x/image/bmp"
+	"golang.org/x/image/bmp"
 )
 
 const (
@@ -198,7 +198,8 @@ func run() {
 
 			// Turn our video frame into a a sprite to be drawn by Pixel
 			pic := pixel.PictureDataFromImage(img)
-			sprite := pixel.NewSprite(pic, pic.Bounds())
+			bounds := pic.Bounds()
+			sprite := pixel.NewSprite(pic, bounds)
 
 			// Clear any previous boxes
 			imd.Clear()
@@ -212,12 +213,12 @@ func run() {
 			// arbitrary detection threshold of 0.4
 			for probabilities[curObj] > 0.4 {
 				// box coordinates come in as [y1,x1,y2,x2]
-				x1 := pic.Bounds().Max.X * float64(boxes[curObj][1])
-				x2 := pic.Bounds().Max.X * float64(boxes[curObj][3])
+				x1 := bounds.Max.X * float64(boxes[curObj][1])
+				x2 := bounds.Max.X * float64(boxes[curObj][3])
 				// TF (0,0) is the upper left, Pixel (0,0) is the lower left, so we need
 				// to subtract the Y values from the max height so we draw from the bottom up
-				y1 := pic.Bounds().Max.Y - (pic.Bounds().Max.Y * float64(boxes[curObj][0]))
-				y2 := pic.Bounds().Max.Y - (pic.Bounds().Max.Y * float64(boxes[curObj][2]))
+				y1 := bounds.Max.Y - (bounds.Max.Y * float64(boxes[curObj][0]))
+				y2 := bounds.Max.Y - (bounds.Max.Y * float64(boxes[curObj][2]))
 
 				objColor := colornames.Map[colornames.Names[int(classes[curObj])]]
 
@@ -294,8 +295,7 @@ func makeTensorFromImage(img []byte) (*tf.Tensor, image.Image, error) {
 		return nil, nil, err
 	}
 
-	r := bytes.NewReader(img)
-	i, _, err := image.Decode(r)
+	i, err := bmp.Decode(bytes.NewReader(img))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -307,20 +307,16 @@ func predictObjectBoxes(input *tf.Tensor) (probabilities, classes []float32, box
 	// Get all the input and output operations
 	inputop := graph.Operation("image_tensor")
 	// Output ops
-	o1 := graph.Operation("detection_boxes")
-	o2 := graph.Operation("detection_scores")
-	o3 := graph.Operation("detection_classes")
-	o4 := graph.Operation("num_detections")
 
 	output, err := session.Run(
 		map[tf.Output]*tf.Tensor{
 			inputop.Output(0): input,
 		},
 		[]tf.Output{
-			o1.Output(0),
-			o2.Output(0),
-			o3.Output(0),
-			o4.Output(0),
+			graph.Operation("detection_boxes").Output(0),
+			graph.Operation("detection_scores").Output(0),
+			graph.Operation("detection_classes").Output(0),
+			graph.Operation("num_detections").Output(0),
 		},
 		nil)
 	if err != nil {
