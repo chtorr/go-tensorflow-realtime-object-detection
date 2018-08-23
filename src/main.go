@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/faiface/pixel"
@@ -108,7 +109,9 @@ func loadLabels(labelsFile string) {
 
 // Read frames from the webcam in a goroutine to absorb some of the read latency.
 // This helps gain ~2 FPS.
-func capture(deviceID int, frames chan []byte) {
+func capture(wg *sync.WaitGroup, deviceID int, frames chan []byte, quit chan struct{}) {
+	defer wg.Done()
+
 	cam, err := gocv.VideoCaptureDevice(deviceID)
 	if err != nil {
 		log.Fatal("failed reading cam")
@@ -119,6 +122,12 @@ func capture(deviceID int, frames chan []byte) {
 	defer frame.Close()
 
 	for {
+		select {
+		case <-quit:
+			return
+		default:
+		}
+
 		if ok := cam.Read(&frame); !ok {
 			log.Fatal("failed reading cam")
 		}
@@ -149,9 +158,13 @@ func run() {
 		panic(err)
 	}
 
+	quit := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+
 	// Start up the background capture
-	framesChan := make(chan []byte)
-	go capture(deviceID, framesChan)
+	framesChan := make(chan []byte, 5)
+	go capture(&wg, deviceID, framesChan, quit)
 
 	// Setup Pixel requirements for drawing boxes and labels
 	mat := pixel.IM
@@ -237,6 +250,10 @@ func run() {
 		default:
 		}
 	}
+
+	<-framesChan
+	quit <- struct{}{}
+	wg.Wait()
 }
 
 // Build a graph to decode bitmap input into the proper tensor shape
