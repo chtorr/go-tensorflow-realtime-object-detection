@@ -46,12 +46,12 @@ var (
 	// global slice of labels
 	labels []string
 	// Webcam device ID for OpenCV
-	deviceID int
+	deviceID string
 )
 
 func main() {
 	modelDir := flag.String("dir", "", "Directory containing the trained model files.")
-	device := flag.Int("device", 0, "The webcam device ID")
+	device := flag.String("device", "0", "The webcam device ID")
 	flag.Parse()
 	if *modelDir == "" {
 		flag.Usage()
@@ -109,12 +109,14 @@ func loadLabels(labelsFile string) {
 
 // Read frames from the webcam in a goroutine to absorb some of the read latency.
 // This helps gain ~2 FPS.
-func capture(wg *sync.WaitGroup, deviceID int, frames chan []byte, quit chan struct{}) {
+func capture(wg *sync.WaitGroup, deviceID string, frames chan []byte, quit chan struct{}) {
 	defer wg.Done()
 
-	cam, err := gocv.VideoCaptureDevice(deviceID)
+	<-quit
+
+	cam, err := gocv.OpenVideoCapture(deviceID)
 	if err != nil {
-		log.Fatal("failed reading cam")
+		log.Fatal("failed reading cam", err)
 	}
 	defer cam.Close()
 
@@ -142,7 +144,9 @@ func capture(wg *sync.WaitGroup, deviceID int, frames chan []byte, quit chan str
 		}
 
 		// Push the frame to the channel
-		frames <- buf
+		if len(frames) == 0 {
+			frames <- buf
+		}
 	}
 }
 
@@ -163,7 +167,7 @@ func run() {
 	wg.Add(1)
 
 	// Start up the background capture
-	framesChan := make(chan []byte, 5)
+	framesChan := make(chan []byte)
 	go capture(&wg, deviceID, framesChan, quit)
 
 	// Setup Pixel requirements for drawing boxes and labels
@@ -178,6 +182,8 @@ func run() {
 		frames = 0
 		second = time.Tick(time.Second)
 	)
+
+	quit <- struct{}{}
 
 	for !win.Closed() {
 		select {
