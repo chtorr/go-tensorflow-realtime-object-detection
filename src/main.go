@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/faiface/pixel"
@@ -23,7 +24,7 @@ import (
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/tensorflow/tensorflow/tensorflow/go/op"
 
-	_ "golang.org/x/image/bmp"
+	"golang.org/x/image/bmp"
 )
 
 const (
@@ -45,12 +46,12 @@ var (
 	// global slice of labels
 	labels []string
 	// Webcam device ID for OpenCV
-	deviceID int
+	deviceID string
 )
 
 func main() {
 	modelDir := flag.String("dir", "", "Directory containing the trained model files.")
-	device := flag.Int("device", 0, "The webcam device ID")
+	device := flag.String("device", "0", "The webcam device ID")
 	flag.Parse()
 	if *modelDir == "" {
 		flag.Usage()
@@ -108,10 +109,14 @@ func loadLabels(labelsFile string) {
 
 // Read frames from the webcam in a goroutine to absorb some of the read latency.
 // This helps gain ~2 FPS.
-func capture(deviceID int, frames chan []byte) {
-	cam, err := gocv.VideoCaptureDevice(deviceID)
+func capture(wg *sync.WaitGroup, deviceID string, frames chan []byte, quit chan struct{}) {
+	defer wg.Done()
+
+	<-quit
+
+	cam, err := gocv.OpenVideoCapture(deviceID)
 	if err != nil {
-		log.Fatal("failed reading cam")
+		log.Fatal("failed reading cam", err)
 	}
 	defer cam.Close()
 
@@ -119,12 +124,18 @@ func capture(deviceID int, frames chan []byte) {
 	defer frame.Close()
 
 	for {
-		if ok := cam.Read(frame); !ok {
+		select {
+		case <-quit:
+			return
+		default:
+		}
+
+		if ok := cam.Read(&frame); !ok {
 			log.Fatal("failed reading cam")
 		}
 
 		// Resize the Mat in place.
-		gocv.Resize(frame, frame, image.Point{X: W, Y: H}, 0.0, 0.0, gocv.InterpolationNearestNeighbor)
+		gocv.Resize(frame, &frame, image.Point{X: W, Y: H}, 0.0, 0.0, gocv.InterpolationNearestNeighbor)
 
 		// Encode Mat as a bmp (uncompressed)
 		buf, err := gocv.IMEncode(".bmp", frame)
@@ -133,7 +144,9 @@ func capture(deviceID int, frames chan []byte) {
 		}
 
 		// Push the frame to the channel
-		frames <- buf
+		if len(frames) == 0 {
+			frames <- buf
+		}
 	}
 }
 
@@ -149,9 +162,13 @@ func run() {
 		panic(err)
 	}
 
+	quit := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+
 	// Start up the background capture
 	framesChan := make(chan []byte)
-	go capture(deviceID, framesChan)
+	go capture(&wg, deviceID, framesChan, quit)
 
 	// Setup Pixel requirements for drawing boxes and labels
 	mat := pixel.IM
@@ -165,6 +182,8 @@ func run() {
 		frames = 0
 		second = time.Tick(time.Second)
 	)
+
+	quit <- struct{}{}
 
 	for !win.Closed() {
 		select {
@@ -185,7 +204,8 @@ func run() {
 
 			// Turn our video frame into a a sprite to be drawn by Pixel
 			pic := pixel.PictureDataFromImage(img)
-			sprite := pixel.NewSprite(pic, pic.Bounds())
+			bounds := pic.Bounds()
+			sprite := pixel.NewSprite(pic, bounds)
 
 			// Clear any previous boxes
 			imd.Clear()
@@ -199,12 +219,12 @@ func run() {
 			// arbitrary detection threshold of 0.4
 			for probabilities[curObj] > 0.4 {
 				// box coordinates come in as [y1,x1,y2,x2]
-				x1 := pic.Bounds().Max.X * float64(boxes[curObj][1])
-				x2 := pic.Bounds().Max.X * float64(boxes[curObj][3])
+				x1 := bounds.Max.X * float64(boxes[curObj][1])
+				x2 := bounds.Max.X * float64(boxes[curObj][3])
 				// TF (0,0) is the upper left, Pixel (0,0) is the lower left, so we need
 				// to subtract the Y values from the max height so we draw from the bottom up
-				y1 := pic.Bounds().Max.Y - (pic.Bounds().Max.Y * float64(boxes[curObj][0]))
-				y2 := pic.Bounds().Max.Y - (pic.Bounds().Max.Y * float64(boxes[curObj][2]))
+				y1 := bounds.Max.Y - (bounds.Max.Y * float64(boxes[curObj][0]))
+				y2 := bounds.Max.Y - (bounds.Max.Y * float64(boxes[curObj][2]))
 
 				objColor := colornames.Map[colornames.Names[int(classes[curObj])]]
 
@@ -237,6 +257,10 @@ func run() {
 		default:
 		}
 	}
+
+	<-framesChan
+	quit <- struct{}{}
+	wg.Wait()
 }
 
 // Build a graph to decode bitmap input into the proper tensor shape
@@ -253,7 +277,6 @@ func decodeBitmapGraph() (g *tf.Graph, input, output tf.Output, err error) {
 
 // Make a tensor from jpg image bytes
 func makeTensorFromImage(img []byte) (*tf.Tensor, image.Image, error) {
-
 	// DecodeJpeg uses a scalar String-valued tensor as input.
 	tensor, err := tf.NewTensor(string(img))
 	if err != nil {
@@ -278,8 +301,7 @@ func makeTensorFromImage(img []byte) (*tf.Tensor, image.Image, error) {
 		return nil, nil, err
 	}
 
-	r := bytes.NewReader(img)
-	i, _, err := image.Decode(r)
+	i, err := bmp.Decode(bytes.NewReader(img))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -291,20 +313,16 @@ func predictObjectBoxes(input *tf.Tensor) (probabilities, classes []float32, box
 	// Get all the input and output operations
 	inputop := graph.Operation("image_tensor")
 	// Output ops
-	o1 := graph.Operation("detection_boxes")
-	o2 := graph.Operation("detection_scores")
-	o3 := graph.Operation("detection_classes")
-	o4 := graph.Operation("num_detections")
 
 	output, err := session.Run(
 		map[tf.Output]*tf.Tensor{
 			inputop.Output(0): input,
 		},
 		[]tf.Output{
-			o1.Output(0),
-			o2.Output(0),
-			o3.Output(0),
-			o4.Output(0),
+			graph.Operation("detection_boxes").Output(0),
+			graph.Operation("detection_scores").Output(0),
+			graph.Operation("detection_classes").Output(0),
+			graph.Operation("num_detections").Output(0),
 		},
 		nil)
 	if err != nil {
